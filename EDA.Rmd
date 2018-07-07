@@ -1,0 +1,189 @@
+---
+title: "Exploratory Data Anlaysis of Home Credit Datasets"
+author: "C. H. Chiu"
+date: "2018年6月30日"
+header-includes:
+    - usepackage{bbm}
+output: 
+  html_document:
+    toc: true
+    theme: united
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+### About the Document
+This document aims to execute some common expoloratory data analyses using 'Home Credit' datset from Kaggle.com. There're several datasets provided by the company. In this document we'll be exploring 'application_train' dataset and trying to discover any interesting patterns.
+
+### About the Data
+From the brief introduction on Kaggle.com:
+
+>Many people struggle to get loans due to insufficient or non-existent credit histories. And, unfortunately, this population is often taken advantage of by untrustworthy lenders.
+
+>Home Credit strives to broaden financial inclusion for the unbanked population by providing a positive and safe borrowing experience. In order to make sure this underserved population has a positive loan experience, Home Credit makes use of a variety of alternative data--including telco and transactional information--to predict their clients' repayment abilities.
+
+>While Home Credit is currently using various statistical and machine learning methods to make these predictions, they're challenging Kagglers to help them unlock the full potential of their data. Doing so will ensure that clients capable of repayment are not rejected and that loans are given with a principal, maturity, and repayment calendar that will empower their clients to be successful.
+
+## Load in the data
+
+```{r, include=FALSE}
+rm(list=ls())
+gc()
+
+load.libraries <- c('ggplot2', 'dplyr', 'Amelia', 'scales', 'nortest', 'data.table', 'gridExtra')
+install.lib <- load.libraries[!load.libraries %in% installed.packages()]
+for(libs in install.lib) install.packages(libs, dependencies = TRUE)
+sapply(load.libraries, require, character = TRUE)
+
+setwd('~/MyKaggle/home-credit')
+```
+
+```{r}
+train = read.csv("./application_train.csv", header = T, na.strings = c(""), stringsAsFactors = FALSE)
+attach(train)
+```
+By using `{r, eval = FALSE} read.csv()` function, we successfully load in the dataset into R. We also attach the dataset so that we can make our codes more concise.
+
+## Structure of the Data
+```{r}
+dim(train)
+```
+First thing after we loaded in the data, we checked there are 307511 observations (rows) and 122 variables (columns) in 'application_train' dataset.
+
+## Missing Data
+We want to briefly summarize the missing data in this dataset. By looking at the first 6 rows, we can see there are actually a lot of columns with missing values.
+```{r}
+head(train)
+```
+
+We proceed to check the percentage of the number of missing values by each column as shown below:
+```{r}
+percent.miss=round(colSums(sapply(train,is.na))/nrow(train)*100)
+as.matrix(percent.miss)
+```
+It is very hard to assign a criterion for 'missingness', but if we assign 50% as our criterion, we can actually see a lot of variables with over 50% missing data. 
+
+```{r}
+sum(percent.miss>=50)
+```
+As calculated above, 44 out of 122 variables have over 50% missing data. We might need to consider an effective imputation method to tackle.
+
+## Exploring numerical variables
+Considering our goal of the analysis is to predict whether a person can repay his/her loan, we intuitively associate factors such as income, amount of loans, previous records of loan, price of the goods the loan's for, etc. We examine a few variables that we think can directly have impact on repaying loans by using histograms. We adopt Freeman-Diaconis' rule ($ h=2\cdot IQR\cdot n^{-1/3} $) to determine the bin width of every histogram in the below section.
+
+### AMT_CREDIT
+```{r}
+bw = (2 * IQR(AMT_CREDIT) / length(AMT_CREDIT)^(1/3)) 
+ggplot(data = train, aes(x = AMT_CREDIT)) + 
+  geom_histogram(aes(y = ..count..), binwidth = bw, fill = 'darkblue')+
+  labs(title='Histogram of Credit Amount')+
+  labs(x='Credit Amount',y='Count') + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+```
+
+### AMT_GOODS_PRICE
+```{r}
+bw = (2 * IQR(AMT_GOODS_PRICE, na.rm = T) / length(AMT_GOODS_PRICE)^(1/3)) 
+ggplot(data = train, aes(x = AMT_GOODS_PRICE)) + 
+  geom_histogram(aes(y = ..count..), binwidth = bw, fill = 'darkred')+
+  labs(title='Histogram of Price of the Goods for which the Loan is Given')+
+  labs(x='Price',y='Count') + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+
+### AMT_ANNUITY
+```{r}
+bw = (2 * IQR(AMT_ANNUITY, na.rm = T) / length(AMT_ANNUITY)^(1/3)) 
+ggplot(data = train, aes(x = AMT_ANNUITY)) + 
+  geom_histogram(aes(y = ..count..), binwidth = bw, fill = 'darkgreen')+
+  labs(title='Histogram of Loan Annuity')+
+  labs(x='Loan Annuity',y='Count') + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+### AMT_INCOME_TOTAL
+```{r}
+bw = (2 * IQR(AMT_INCOME_TOTAL, na.rm = T) / length(AMT_INCOME_TOTAL)^(1/3)) 
+ggplot(data = train, aes(x = AMT_INCOME_TOTAL)) + 
+  geom_histogram(aes(y = ..count..), binwidth = bw, fill = 'darkgreen')+
+  labs(title='Histogram of Income Total')+
+  labs(x='Income Total',y='Count') + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  xlim(c(0, 1e6))
+```
+In the above section, we display histograms of AMT_CREDIT, AMT_GOODS_PRICE, AMT_ANNUITY and AMT_INCOME_TOTAL. For AMT_INCOME_TOTAL (Total income), we restrict the upper limit of the x axis to 1000000 since the maximum is so extreme that it skewed the histogram a lot. None of the 4 variables seems normal distributed, but still we use Anderson-Darling test for normality to check their statistical significance.
+
+```{r}
+adtest = apply(cbind(AMT_CREDIT, AMT_GOODS_PRICE,AMT_ANNUITY, AMT_INCOME_TOTAL), 2, function(x) ad.test(x)$p.value)
+adtest
+```
+The above displays the corresponding p-values of the 4 variables. Under significance level of 5%, we can reject all 4 null hypothesis since all 4 values are way lower than 5%. Thus we claim the 4 variables are not normal distributed.
+
+## Exploring categorical variables
+In this section we then examine the categorical variables in the dataset. Barplots can help us to gain some basic insights.
+```{r}
+cat_var <- names(train)[which(sapply(train, is.character))]
+train.dt = setDT(train)
+train_cat <- train.dt[,.SD, .SDcols = cat_var]
+
+plotHist <- function(data_in, i) {
+  data <- data.frame(x=data_in[[i]])
+  p <- ggplot(data=data, aes(x=factor(x))) + stat_count() + xlab(colnames(data_in)[i]) + theme_light() + 
+    theme(axis.text.x = element_text(angle = 90, hjust =1))
+  return (p)
+}
+
+doPlots <- function(data_in, fun, ii, ncol=3) {
+  pp <- list()
+  for (i in ii) {
+    p <- fun(data_in=data_in, i=i)
+    pp <- c(pp, list(p))
+  }
+  do.call("grid.arrange", c(pp, ncol=ncol))
+}
+```
+
+```{r}
+doPlots(train_cat, fun = plotHist, ii = 1:4, ncol = 2)
+```
+
+*NAME_CONTRACT_TYPE: The majority of loans are cash loan.
+
+```{r}
+doPlots(train_cat, fun = plotHist, ii = 5:6, ncol = 2)
+```
+
+```{r}
+doPlots(train_cat, fun = plotHist, ii = 7:8, ncol = 2)
+```
+
+*NAME_EDUCATION_TYPE: Most applicants' education are secondary or secondary special schools. The second largest type is higher education. As we might expect, applicants with higher education are more likely to repay their loan since they typically have better income.
+
+*NAME_FAMILY_STATUS: Large proportion of applicants are married. Once again as we expect, married people generally have more expense, and if with kids the expense would be quite a burden. Therefore, family status would certainly affect loan repaying.
+
+
+```{r}
+doPlots(train_cat, fun = plotHist, ii = c(9,11), ncol = 2)
+```
+```{r}
+doPlots(train_cat, fun = plotHist, ii = c(10), ncol = 1)
+```
+
+```{r}
+doPlots(train_cat, fun = plotHist, ii = c(12), ncol = 1)
+```
+
+```{r}
+doPlots(train_cat, fun = plotHist, ii = 13:14, ncol = 2)
+```
+
+```{r}
+doPlots(train_cat, fun = plotHist, ii = 15:16, ncol = 2)
+```
+
+As wee see above, a lot of variables have a large portion of missing values, and some of them even have the highest frequency. Without proper imputation methods, the variables' inclusion might damage the accuracy of the predictive model.
